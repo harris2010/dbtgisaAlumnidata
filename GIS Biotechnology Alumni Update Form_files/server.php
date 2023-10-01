@@ -1,0 +1,1 @@
+Submissions.startUpGridSettings({"gridAutoFit":{"toogle":"show","checked":"yes"},"displayImgRaw":{"toogle":"show","checked":"yes"},"useModalImg":{"toogle":"show","checked":"yes"},"success":true,"duration":"0.003"});
