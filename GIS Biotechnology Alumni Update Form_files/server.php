@@ -1,0 +1,1 @@
+jf_Reports.tableInit({"displayImgRaw":{"toogle":"show","checked":"yes"},"useModalImg":{"toogle":"show","checked":"yes"},"showEditURLs":{"toogle":"show","checked":"yes"},"success":true,"duration":"0.003"});
