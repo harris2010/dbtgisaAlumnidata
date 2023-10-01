@@ -1,0 +1,94 @@
+(function($) {
+
+    var Utils = function()
+    {
+        this.rotations = {
+            "default": {
+                css: {
+                    'transform-origin': 'top left',
+                    '-webkit-transform-origin': 'top left',
+                    '-ms-transform-origin': 'top left'
+                }
+            },
+            "flip180": {
+                css: {
+                    'transform': 'rotate(180deg) translate(-100%,-100%)',
+                    '-webkit-transform': 'rotate(180deg) translate(-100%,-100%)',
+                    '-ms-transform': 'rotate(180deg) translateX(-100%,-100%)'
+                }
+            },
+            "cw90": {
+                css: {
+                    'transform': 'rotate(90deg) translateY(-100%)',
+                    '-webkit-transform': 'rotate(90deg) translateY(-100%)',
+                    '-ms-transform': 'rotate(90deg) translateY(-100%)'
+                }
+            },
+            "ccw90": {
+                css: {
+                    'transform': 'rotate(-90deg) translateX(-100%)',
+                    '-webkit-transform': 'rotate(-90deg) translateX(-100%)',
+                    '-ms-transform': 'rotate(-90deg) translateX(-100%)'
+                }
+            }
+
+        },
+        // ----------------------------------------------------------
+        // A short snippet for detecting versions of IE in JavaScript
+        // without resorting to user-agent sniffing
+        // ----------------------------------------------------------
+        // If you're not in IE (or IE version is less than 5) then:
+        //     ie === undefined
+        // If you're in IE (>=5) then you can determine which version:
+        //     ie === 7; // IE7
+        // Thus, to detect IE:
+        //     if (ie) {}
+        // And to detect the version:
+        //     ie === 6 // IE6
+        //     ie > 7 // IE8, IE9 ...
+        //     ie < 9 // Anything less than IE9
+        // ----------------------------------------------------------
+        this.getIEversion = function()
+        {
+            var undef,
+                v = 3,
+                div = document.createElement('div'),
+                all = div.getElementsByTagName('i');
+            
+            while (
+                div.innerHTML = '<!--[if gt IE ' + (++v) + ']><i></i><![endif]-->',
+                all[0]
+            );
+            
+            return v > 4 ? v : undef;
+        },
+        appendScript = function( filename )
+        {
+            var sc = document.createElement('script');
+                sc.type = 'text/javascript'; sc.async = true;
+                sc.src = filename;
+                var s = document.getElementsByTagName('script')[0];
+                s.parentNode.insertBefore(sc, s);
+        }
+    };
+
+    $.fn.rotateImg = function(rotation) {
+        var elem = this;
+        var u = new Utils();
+        var ie = u.getIEversion();
+        if ( ie >= 9 || !ie )
+        {
+            var defaultCss = u.rotations['default'].css;
+            var cssProp = u.rotations[rotation].css;
+            elem.css(defaultCss);
+            elem.css(cssProp);
+        }
+        else
+        {
+            console.error("Dont support IE at the moment");
+            // u.appendScript("/opt/tablesorter/addons/imagemod/cssQuery-p.js");
+            // u.appendScript("/opt/tablesorter/addons/imagemod/sylvester.js");
+            // u.appendScript("/opt/tablesorter/addons/imagemod/cssSandpaper.js");
+        }
+    };
+})(jQuery);

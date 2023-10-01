@@ -1,0 +1,510 @@
+var jf_Reports = (function(window, $){
+
+    function ReportListing() {
+        var settings = {};
+        var imageVerifier = /\.\bpng\b|\bjpg\b|\bjpeg\b|\bgif\b|\bbmp\b|\btiff\b|\btif\b$/gim;
+        var maxTwidth = 120;
+        var maxTheight = 120;
+        var filepickerQuery = {
+            convertQueryStr: '/convert?',
+            exif: '/convert?rotate=exif&h=750&fit=max',
+            heightRotate: '/convert?h='+ maxTheight + '&rotate=exif',
+            cachedFilenames: {}
+        };
+
+        // exposed functions
+        this.tableInit = tableInit;
+        this.gridInit = gridInit;
+        this.handleGridLinks = handleGridLinks;
+        this.handleImagesModal = handleImagesFancyModal;
+        this.qtipDialogue = qtipDialogue;
+
+        /**
+         * Parse JSON safely
+         */
+        function safeParseJSON(value){
+            if (typeof value !== 'string'){
+                return value;
+            }
+            try{
+                return safeParseJSON(JSON.parse(value));
+            }catch(e){
+                return false;
+            }            
+        }
+        
+        /**
+         * Initialize scripts neded by table report
+         */
+        function tableInit(_settings) {
+            var settingsMessage;
+            if (_settings && _settings.message){
+                settingsMessage = safeParseJSON(_settings.message);
+            }
+            if (_settings && !_settings.displayImgRaw && settingsMessage && settingsMessage.displayImgRaw){
+                _settings.displayImgRaw = settingsMessage.displayImgRaw;
+            }
+            if (_settings && !_settings.useModalImg && settingsMessage && settingsMessage.useModalImg){
+                _settings.useModalImg = settingsMessage.useModalImg;
+            }
+            // set settings
+            settings = {
+                displayImgRaw: ( _settings && _settings.success && _settings.displayImgRaw && _settings.displayImgRaw.checked=="yes") ? true : false,
+                useModalForImgs: ( _settings && _settings.success && _settings.useModalImg && _settings.useModalImg && _settings.useModalImg.checked=="yes") ? true : false
+            };
+
+            $(document).ready(function(){
+                //links that was converted by linkify
+                $(".tablesorter").linkify({
+                    handleLinks: function(links){
+                        $.each(links,function(){
+                            handleTableLinks.call(this, 'nofilename');
+                        });
+                    }
+                });
+
+                //raw links ( those raw <a> tags )
+                $('.tablesorter a').each(function(){
+                    handleTableLinks.call(this, 'wfilename');
+                });
+
+                //find date column indices
+                var index = 0;
+                var headers = {};
+                $(".tablesorter th").each(function(){
+                    if ($(this).attr("date-format")) {
+                        var format = $(this).attr("date-format").toLowerCase();
+                        if (format.indexOf("d") === 0) { // only format d-m-Y
+                            headers[index] = {sorter:"date-range"};
+                        }
+                    }
+                    index++;
+                });
+                $(".tablesorter tbody td").each(function(){
+                        $(this).attr('tabindex', 0);
+                });
+                // add parser to table sorter
+                $.tablesorter.addParser({
+                    id: "date-range",
+                    is: function(){
+                        return false;
+                    },
+                    format: function(s, table, cell) {
+                        var dates = s.replace(/(\d{1,2})([\/\-.]{1})(\d{1,2})[\/\-.]{1}(\d{4})/g, "$3$2$1$2$4").split(' - '),
+                        parsed = [];
+                        if (dates.length) {
+                            $.each(dates, function(i,d){
+                                var v = new Date(d);
+                                parsed.push($.type(v) === 'date' ? v.getTime() : d);
+                            });
+                        }
+                        return parsed.length ? parsed.join('') : s;
+                    },
+                    parsed : true,
+                    type: "text"
+                });
+
+                // apply table sorter
+                $("#data-table").tablesorter({
+                    widgets: ["zebra","stickyHeaders"],
+                    headers: headers
+                });
+
+                // next handle modal image if any
+                if ( 'useModalForImgs' in settings ) {
+                    setTimeout(function(){
+                        handleImagesFancyModal(settings.useModalForImgs);
+                    }, 0);
+                }
+            });
+        }
+
+        /**
+         * Initialize scripts needed by grid report
+         */
+        function gridInit() {
+            var timeout = false;
+
+            Event.observe(window, 'resize', function(){
+                if (timeout){ clearTimeout(timeout); }
+                timeout = setTimeout(function(){
+                    var rpp = Math.floor((document.viewport.getDimensions().height - 22 - 27) / 22);
+                    var start = 0;
+                    try{
+                        if(
+                            Submissions.grid.getStore() &&
+                            Submissions.grid.getStore().lastOptions &&
+                            Submissions.grid.getStore().lastOptions.params
+                        ){
+                            start = Submissions.grid.getStore().lastOptions.params.start || 0;
+                        }
+
+                        Submissions.grid.getStore().load({params: {start:start,  limit: rpp}});
+                    }catch(e){console.error(e);}
+                }, 500);
+            });
+
+            document.observe("dom:loaded", function() {
+                Submissions.excludeColumns.each(function(e) {
+                    Submissions.hideShowGridColumn(e,true)
+                });
+            });
+        }
+
+        /**
+         * Handle tooltips of img links
+         */
+        function initToolTips() {
+            $('.tooltip').tooltipster({
+                position: 'bottom-left',
+                offsetX: 10,
+                content: '<span class="loading">Loading...</span>',
+                updateAnimation: false,
+                functionBefore: function(origin, continueTooltip) {
+                    //continue tooltip
+                    continueTooltip();
+
+                    //get url and set
+                    var imageUrl = $(origin).attr('href');
+
+                    if ( isFilepickerLink(imageUrl) ) {
+                        //find if convert exif is already existed on the url, if so remove
+                        var c = imageUrl.indexOf(filepickerQuery.exif);
+                        if ( c > -1 ) {
+                            imageUrl = String( imageUrl.substr(0, c) + filepickerQuery.heightRotate );
+                        }
+                    }
+
+                    $('<img />', {
+                        src: imageUrl
+                    }).css({
+                        'max-width': maxTwidth,
+                        'max-height': maxTheight
+                    }).load(function(){
+                        var img = $(this);
+                        if ( origin.data('imgdata') !== 'cached' ) {
+                            img.hide();
+                            origin.tooltipster('update', img).data('imgdata', 'cached');
+                            img.fadeIn();
+                        }
+                    });
+                }
+            });
+        }
+
+        /**
+         * Display image on the table columns
+         */
+        function displayImage(obj) {
+            // verify if its an image link
+            // or a filepicker links
+            const fileLinkRegex = imageVerifier.test(obj.filelink)
+            const fileTitleRegex = imageVerifier.test(obj.filetitle)
+            const isFilePickerLink = isFilepickerLink(obj.filelink)
+            if ( fileLinkRegex || fileTitleRegex || isFilePickerLink ) {
+                var href = newhref = imagesourcelink = obj.elem.attr('href');
+
+                // make sure get the file name if its a filepicker link
+                obj.filename = (isFilepickerLink(obj.filename)) ? obj.filename.replace(/%20/g," ").split("/").pop() : obj.filename;
+
+                // if link is filepicker - gets its metadata
+                // this is for the new version of the widget
+                if ( isFilepickerLink(href) ) {
+                    newhref = mergeWithFilepickerQueryString(href, filepickerQuery.exif);
+                    imagesourcelink = mergeWithFilepickerQueryString(href, filepickerQuery.heightRotate);
+                    obj.filename = fixFilepickerNameWithConvertQuery(href, obj.filename);
+
+                    // fetch filepicker name if not cached and no title
+                    if ( !obj.elem.attr('title') ) {
+                        if ( !(obj.filename in filepickerQuery.cachedFilenames) ) {
+                            var metadataLink = getRealFilepickerLink(href) + '/metadata?filename=true';
+                            $.getJSON(metadataLink, function(response){
+                                var realfilename = ('filename' in response) ? response.filename : '';
+                                obj.elem.attr('title', realfilename);
+                                filepickerQuery.cachedFilenames[obj.filename] = realfilename;
+                            });
+                        } else {
+                            obj.elem.attr('title', filepickerQuery.cachedFilenames[obj.filename]);
+                        }
+                    }
+                }
+
+                //display the image directly to the page
+                if ( 'displayImgRaw' in settings && settings.displayImgRaw === true ) {
+                    //modify link, check if filepicker or not
+                    var imglink = getRawImageTemplate();
+                    imglink.attr('src', imagesourcelink);
+
+                    // append img link to a tag
+                    obj.elem.attr('href', newhref)
+                            .addClass("thumbnail raw-image")
+                            .html('')
+                            .append(imglink)
+                            .append($('<br/><span class="filename">'+obj.filename+'</span>'));
+                } else {
+                    var magnifier = getManifierTemplate();
+                    obj.elem.attr('href', newhref)
+                            .addClass("thumbnail tooltip")
+                            .html('')
+                            .append(magnifier)
+                            .append(obj.filename);
+
+                    // initialize tooltips
+                    initToolTips();
+                }
+            }
+        }
+
+        /**
+         * Custom qtip dialogue
+         */
+        function qtipDialogue(options) {
+            var modalOn = true
+              , modalBlur = true;
+
+            $('<div />').qtip({
+                content: {
+                    text: options.content,
+                    title: options.title + "<div class=\"modal-close\">x</div>"
+                },
+                position: {
+                    my: 'center', at: 'center', // Center it...
+                    target: $(document.body) // ... in the window
+                },
+                show: {
+                    ready: true, // Show it straight away
+                    modal: {
+                        on: modalOn, // Make it modal (darken the rest of the page)...
+                        blur: modalBlur // ... but don't close the tooltip when clicked
+                    }
+                },
+                style: {
+                    classes: 'ui-tooltip-light ui-tooltip-rounded ui-tooltip-dialogue',
+                    width: { max: 350 }
+                },
+                hide: false,
+                events: {
+                    render: function(event,api){
+                        console.log("qtip render", event, api);
+
+                        $('.modal-close').on('click', api.hide);
+                    },
+                    hide: function(event, api) {
+                        console.log('qtip hide', event, api);
+                        api.destroy();
+                    }
+                }
+            });
+        }
+
+        /**
+         * Responsible on assigning modals to images, only if set
+         */
+        function handleImagesFancyModal(useModalForImgs) {
+            if ( useModalForImgs === true ) {
+                $('a.thumbnail').fancybox({
+                    type: 'image',
+                    closeBtn: true,
+                    openEffect: 'elastic',
+                    closeEffect: 'elastic',
+                    helpers: {
+                        title: {
+                            type: 'float',
+                        },
+                        overlay: {
+                            closeClick : true,
+                            locked: false
+                        }
+                    }
+                });
+            }
+        }
+
+        /**
+         * Handle all links inside the table
+         * convert url-like string to real links and add tooltips
+         * scope: element
+         */
+        function handleTableLinks(type) {
+            var fileRawName = ""
+              , fileTitle = "";
+
+            if ( type === "nofilename" ) {
+                fileRawName = $(this).html().replace(/%20/g," ").split("/").pop();
+            } else if ( type == "wfilename" ) {
+                fileRawName = $(this).text();
+                fileTitle = $(this).attr('title');
+            }
+
+            displayImage({
+                elem: $(this),
+                filename: fileRawName,
+                filelink: fileRawName,
+                filetitle: fileTitle
+            });
+        }
+
+        /**
+         * Handle all links inside the grid
+         */
+        function handleGridLinks(_settings, linkTagsContainer) {
+            settings = _settings || null;
+            if ( typeof $ === 'function' )  {
+                // replace all newlines with linebreak
+                $('.x-grid3-cell-inner').each(function(){
+                    var br = $(this).html().replace(/(?:\r\n|\r|\n)/g, '<br/>');
+                    $(this).html(br);
+                });
+
+                //links that was converted by linkify
+                $(".x-grid-panel").linkify();
+
+                // display images for links
+                // if its an image link
+                $('a', $(linkTagsContainer)).each(function() {
+                    displayImage({
+                        elem: $(this),
+                        filename: $(this).text(),
+                        filelink: $(this).attr('href'),
+                        filetitle: $(this).attr('title')
+                    });
+                });
+            } else {
+                console.error('jQuery library is missing.');
+            }
+        }
+
+        /**
+         * Parse query string
+         * and make it an object array
+         */
+        function parseQuery(qstr) {
+            var query = {};
+            var a = qstr.split('&');
+            for (var i = 0; i < a.length; i++) {
+                var b = a[i].split('=');
+                query[decodeURIComponent(b[0])] = decodeURIComponent(b[1] || '');
+            }
+            return query;
+        }
+
+        /**
+         * build a query from object array
+         */
+        function buildQuery(queryobject) {
+            var output = [];
+            for ( query in queryobject ) {
+                var val = [query, queryobject[query]].join('=');
+                output.push(val);
+            }
+
+            return output.join('&');
+        }
+
+        /**
+         * Merge existing query strings
+         * for filepicker links only
+         */
+        function mergeWithFilepickerQueryString(href, querytype) {
+            if ( !isFilepickerLink(href) ) {
+                return href;
+            }
+
+            // find convert query on the link
+            if ( href.indexOf(filepickerQuery.convertQueryStr) > -1 ) {
+                var hrefSplit = href.split(filepickerQuery.convertQueryStr);
+                var newhref = hrefSplit[0];
+                var convertQuery = hrefSplit[1];
+
+                // get query value of convert
+                var newquery = querytype + '&' + convertQuery;
+
+                // parse query
+                newquery = parseQuery(newquery.replace(filepickerQuery.convertQueryStr, ''));
+
+                // there should be no crop and height query at the same time
+                if ( 'crop' in newquery ) {
+                    if ( 'h' in newquery ){
+                        delete newquery.h;
+                    }
+                }
+
+                // set value of new href with merged convert values
+                return newhref + filepickerQuery.convertQueryStr + buildQuery(newquery);
+            } else {
+                return href + querytype;
+            }
+        }
+
+        /**
+         * Fixed the filepicker name
+         * with a convert query as the name
+         * for filepickers links only
+         */
+        function fixFilepickerNameWithConvertQuery(href, filename) {
+            if ( !isFilepickerLink(href) ) {
+                return href;
+            }
+
+            // find convert query on the link
+            if ( href.indexOf(filepickerQuery.convertQueryStr) > -1 ) {
+                var hrefSplit = href.split(filepickerQuery.convertQueryStr);
+                var newhref = hrefSplit[0];
+                return newhref.split("/").pop().substr(0, 10);
+            } else {
+                // for new format name should be cut until 10 chars
+                if ( filename.length > 10 ) {
+                    filename = filename.substr(0, 10);
+                }
+
+                return filename;
+            }
+        }
+
+        /**
+         * Test if a link is a filepicker
+         */
+        function isFilepickerLink(link) {
+            return /filepicker/.test(link);
+        }
+
+        /**
+         * Get the real filepicker link
+         */
+        function getRealFilepickerLink(link) {
+            if ( isFilepickerLink(link) && link.indexOf('?') > -1 ) {
+                link = link.split('?')[0].substr(0, link.lastIndexOf('/'));
+            }
+
+            return link;
+        }
+
+        /**
+         * Template for image tag with manifier
+         */
+        function getManifierTemplate() {
+            return $('<div/>').addClass('magnifier');
+        }
+
+        /**
+         * Template for image tags
+         */
+        function getRawImageTemplate() {
+            return $('<img/>',  {
+                align: 'absmiddle'
+            }).css({
+                marginTop: '10px',
+                'max-width': maxTwidth + 'px',
+                'max-height': maxTheight + 'px'
+            });
+        }
+    }
+
+    return new ReportListing();
+
+})(window, jQuery);
+
+var pathname = String(window.location.pathname);
+if ( pathname.indexOf('grid') > -1 ) {
+    jf_Reports.gridInit();
+}
